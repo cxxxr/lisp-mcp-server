@@ -10,6 +10,7 @@
     :yason
     :usocket
     :bordeaux-threads
+    :trivial-backtrace
     )
   :serial t
   :components (
@@ -37,6 +38,7 @@
                              (:file "protocol-test")
                              (:file "logging-test")
                              (:file "tools-test")
+                             (:file "error-test")
                              (:file "tcp-test")
                              (:file "bridge-test"))))
   :perform (asdf:test-op (op c)

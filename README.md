@@ -93,6 +93,13 @@ Response (excerpt):
 - Structured JSON line logs to `*error-output*`.
 - Control level via env var `MCP_LOG_LEVEL` with one of: `debug`, `info`, `warn`, `error`.
 
+### Error details
+
+- By default, JSON-RPC error responses include error messages and stack traces in `error.data.backtrace`.
+- You can suppress details with `MCP_ERROR_DETAIL=message` for message only, or `MCP_ERROR_DETAIL=none` for no details.
+  Both settings apply to parse/internal/tool errors.
+  Since backtraces contain internal information, only enable them in trusted environments.
+
 Example:
 
 ```bash

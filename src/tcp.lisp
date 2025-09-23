@@ -18,7 +18,7 @@ accepts a single connection and returns T after the client closes."
     (unwind-protect
          (progn
            (setf listener (usocket:socket-listen host port :reuse-address t
-                                                :element-type 'character))
+                                                           :element-type 'character))
            (let ((actual (usocket:get-local-port listener)))
              (when on-listening (funcall on-listening actual)))
            (labels ((handle-one ()

@@ -5,13 +5,13 @@
 ;; Real transport/protocol handling will be implemented TDD-first later.
 
 (declaim (ftype (function (&key (:transport (member :stdio :tcp))
-                                  (:in stream) (:out stream)
-                                  (:host string) (:port (or integer null))
-                                  (:accept-once t) (:on-listening function))
+                                (:in stream) (:out stream)
+                                (:host string) (:port (or integer null))
+                                (:accept-once t) (:on-listening function))
                           (values boolean &optional))
                 run))
 (defun run (&key (transport :stdio) (in *standard-input*) (out *standard-output*)
-                  (host "127.0.0.1") (port 0) (accept-once t) on-listening)
+                 (host "127.0.0.1") (port 0) (accept-once t) on-listening)
   "Start the MCP server loop. For :stdio, reads newline-delimited JSON from IN
 and writes responses to OUT. Returns T when input is exhausted (EOF).
 

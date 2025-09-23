@@ -62,12 +62,12 @@
    "inputSchema" (%make-ht
                   "type" "object"
                   "properties" (let ((p (make-hash-table :test #'equal)))
-                                  (setf (gethash "code" p)
-                                        (%make-ht "type" "string" "description" "Code string of one or more forms"))
-                                  (setf (gethash "package" p) (%make-ht "type" "string"))
-                                  (setf (gethash "printLevel" p) (%make-ht "type" "integer"))
-                                  (setf (gethash "printLength" p) (%make-ht "type" "integer"))
-                                  p))))
+                                 (setf (gethash "code" p)
+                                       (%make-ht "type" "string" "description" "Code string of one or more forms"))
+                                 (setf (gethash "package" p) (%make-ht "type" "string"))
+                                 (setf (gethash "printLevel" p) (%make-ht "type" "integer"))
+                                 (setf (gethash "printLength" p) (%make-ht "type" "integer"))
+                                 p))))
 
 (defun handle-tools-list (id)
   (let* ((tools (vector (tools-descriptor-repl))))
@@ -93,15 +93,28 @@ Returns a downcased local tool name (string)."
               (pkg  (and args (gethash "package" args)))
               (pl   (and args (gethash "printLevel" args)))
               (plen (and args (gethash "printLength" args))))
-         (multiple-value-bind (printed _)
-             (repl-eval (or code "")
-                        :package (or pkg *package*)
-                        :print-level pl
-                        :print-length plen)
-           (declare (ignore _))
-           (let* ((item (%make-ht "type" "text" "text" printed))
-                  (content (make-array 1 :initial-contents (list item))))
-             (%result id (%make-ht "content" content))))))
+         (handler-case
+             (multiple-value-bind (printed _)
+                 (repl-eval (or code "")
+                            :package (or pkg *package*)
+                            :print-level pl
+                            :print-length plen)
+               (declare (ignore _))
+               (let* ((item (%make-ht "type" "text" "text" printed))
+                      (content (make-array 1 :initial-contents (list item))))
+                 (%result id (%make-ht "content" content))))
+           (condition (c)
+             (log-event :error "tools.error"
+                        "name" (or name local)
+                        "type" (condition-type-string c)
+                        "message" (princ-to-string c))
+             (let ((data (%make-ht
+                          "tool" (or name local)
+                          "type" (condition-type-string c)
+                          "message" (princ-to-string c)))
+                   (bt (%backtrace-string c)))
+               (when bt (setf (gethash "backtrace" data) bt))
+               (%error id -32000 "Tool evaluation error." data))))))
       (t
        (%error id -32601 (format nil "Tool ~A not found" name))))))
 
@@ -115,26 +128,47 @@ Returns a downcased local tool name (string)."
 
 (defun process-json-line (line &optional (state (make-state)))
   "Process one JSON-RPC line and return a JSON line to send, or NIL for notifications."
-  (let* ((msg (%decode-json line))
-         (jsonrpc (gethash "jsonrpc" msg))
-         (id (gethash "id" msg))
-         (method (gethash "method" msg))
-         (params (gethash "params" msg)))
-    (log-event :debug "rpc.dispatch" "id" id "method" method)
-    (unless (and (stringp jsonrpc) (string= jsonrpc "2.0"))
-      (let ((resp (%encode-json (%error id -32600 "Invalid Request"))))
-        (log-event :warn "rpc.invalid" "reason" "bad jsonrpc version")
-        (return-from process-json-line resp)))
-    (if method
-        (if id
-            (let ((r (handle-request state id method params)))
-              (log-event :debug "rpc.result" "id" id "method" method)
-              (%encode-json r))
-            ;; notification
-            (progn
-              (handle-notification state method params)
-              (log-event :debug "rpc.notify" "method" method)
-              nil))
+  (let* ((msg nil)
+         (early-resp nil))
+    (handler-case
+        (setf msg (%decode-json line))
+      (condition (c)
+        (log-event :error "rpc.parse-error" "message" (princ-to-string c))
+        (let* ((bt (%backtrace-string c))
+               (data (when bt (let ((h (make-hash-table :test #'equal)))
+                                (setf (gethash "backtrace" h) bt)
+                                h))))
+          (setf early-resp (%encode-json (%error nil -32700 "Parse error" data))))))
+    (when early-resp (return-from process-json-line early-resp))
+    (let* ((jsonrpc (gethash "jsonrpc" msg))
+           (id (gethash "id" msg))
+           (method (gethash "method" msg))
+           (params (gethash "params" msg)))
+      (log-event :debug "rpc.dispatch" "id" id "method" method)
+      (unless (and (stringp jsonrpc) (string= jsonrpc "2.0"))
         (let ((resp (%encode-json (%error id -32600 "Invalid Request"))))
-          (log-event :warn "rpc.invalid" "reason" "missing method")
-          resp))))
+          (log-event :warn "rpc.invalid" "reason" "bad jsonrpc version")
+          (return-from process-json-line resp)))
+      (handler-case
+          (if method
+              (if id
+                  (let ((r (handle-request state id method params)))
+                    (log-event :debug "rpc.result" "id" id "method" method)
+                    (%encode-json r))
+                  ;; notification
+                  (progn
+                    (handle-notification state method params)
+                    (log-event :debug "rpc.notify" "method" method)
+                    nil))
+              (let ((resp (%encode-json (%error id -32600 "Invalid Request"))))
+                (log-event :warn "rpc.invalid" "reason" "missing method")
+                resp))
+        (condition (c)
+          (log-event :error "rpc.internal" "id" id "method" method
+                     "message" (princ-to-string c))
+          (let ((bt (%backtrace-string c))
+                (data nil))
+            (when bt (let ((h (make-hash-table :test #'equal)))
+                       (setf (gethash "backtrace" h) bt)
+                       (setf data h)))
+            (%encode-json (%error id -32603 "Internal error" data))))))))

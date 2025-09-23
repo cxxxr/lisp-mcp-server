@@ -3,6 +3,7 @@
 
 (defparameter *log-level* :debug)
 (defparameter *log-stream* *error-output*)
+(defparameter *error-detail* :backtrace)
 
 (defun %level->int (level)
   (ecase level
@@ -26,6 +27,20 @@
          (lvl (%parse-level (and env (string-downcase env)))))
     (when lvl (setf *log-level* lvl))
     *log-level*))
+
+(defun %parse-error-detail (s)
+  (cond
+    ((null s) nil)
+    ((string= s "none") :none)
+    ((string= s "message") :message)
+    ((string= s "backtrace") :backtrace)
+    (t nil)))
+
+(defun set-error-detail-from-env ()
+  (let* ((env (uiop:getenv "MCP_ERROR_DETAIL"))
+         (val (%parse-error-detail (and env (string-downcase env)))))
+    (when val (setf *error-detail* val))
+    *error-detail*))
 
 (defun %ts-iso8601 ()
   (multiple-value-bind (sec min hour day mon year) (decode-universal-time (get-universal-time) 0)
@@ -51,3 +66,19 @@ Additional key-values KV can be provided as alternating strings and values."
 ;; initialize level from env at load
 (set-log-level-from-env)
 
+;; initialize error detail policy from env at load
+(set-error-detail-from-env)
+
+(defun %backtrace-string (e)
+  (when (eql *error-detail* :backtrace)
+    (handler-case
+        (with-output-to-string (s)
+          (trivial-backtrace:print-backtrace e :output s))
+      (t () nil))))
+
+(defun condition-type-string (c)
+  (let ((nm (ignore-errors (class-name (class-of c)))))
+    (cond
+      ((symbolp nm) (string-downcase (symbol-name nm)))
+      ((stringp nm) (string-downcase nm))
+      (t (string-downcase (princ-to-string (type-of c)))))))
